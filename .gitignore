@@ -1,0 +1,47 @@
+# === Secrets & Credentials ===
+.env
+.streamlit/secrets.toml
+*.env.local
+*.env.example
+
+# === Large / Auto-generated files ===
+faiss_index/
+faiss_index/*
+!faiss_index/.gitkeep          # optional: keep folder structure
+
+phase3_chatbot.db
+*.db
+*.sqlite3
+
+# === Document folders (your PDFs are probably big or private) ===
+Server/
+Server/*
+!Server/.gitkeep               # optional: keep folder so people know where to put PDFs
+
+# === Python cache ===
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+
+# === Virtual environments ===
+.venv/
+venv/
+env/
+
+# === IDE / Editor ===
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# === Logs ===
+chatbot.log
+*.log
+
+# === OS files ===
+.DS_Store
+Thumbs.db
