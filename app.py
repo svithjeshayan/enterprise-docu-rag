@@ -1,4 +1,7 @@
 # app_improved.py — PHASE 3 IMPROVED: Production-Ready Multi-User RAG Chatbot
+import os
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
 import streamlit as st
 from pathlib import Path
 import hashlib
@@ -19,6 +22,52 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_community.vectorstores import FAISS
+
+# === FIX INVISIBLE SOURCES - INJECT CUSTOM CSS ===
+st.markdown("""
+<style>
+    .source-box {
+        padding: 12px 16px;
+        margin: 8px 0;
+        border-left: 4px solid #4CAF50;
+        border-radius: 0 8px 8px 0;
+        background-color: var(--text-color) !important;   /* this is the trick */
+        background-color: rgba(0, 0, 0, 0.05) !important; /* fallback */
+        color: var(--text-color) !important;
+        font-size: 0.95rem;
+        line-height: 1.5;
+    }
+    .source-box strong {
+        color: #4CAF50;
+    }
+
+    /* Force correct colors in both themes */
+    [data-testid="stExpander"] .source-box {
+        background-color: var(--background-color) !important;
+        color: var(--text-color) !important;
+    }
+
+    /* Very safe fallback for light theme */
+    @media (prefers-color-scheme: light) {
+        .source-box {
+            background-color: #f8f9fa !important;
+            color: #212529 !important;
+            border-left-color: #28a745 !important;
+        }
+        .source-box strong { color: #28a745 !important; }
+    }
+
+    /* Very safe fallback for dark theme */
+    @media (prefers-color-scheme: dark) {
+        .source-box {
+            background-color: #2d2d2d !important;
+            color: #e0e0e0 !important;
+            border-left-color: #4ade80 !important;
+        }
+        .source-box strong { color: #4ade80 !important; }
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # === LOGGING SETUP ===
 logging.basicConfig(
@@ -573,14 +622,17 @@ QUESTION: {prompt}"""
                     st.markdown(answer)
                     
                     # Show sources
-                    with st.expander("📚 View Sources"):
-                        for doc, score in relevant_results:
-                            source = doc.metadata.get('source', 'Unknown')
+                    with st.expander("View Sources", expanded=False):
+                        for i, (doc, score) in enumerate(relevant_results, 1):
+                            source = doc.metadata.get('source', 'Unknown document')
                             chunk = doc.metadata.get('chunk', '?')
+                            preview = doc.page_content.replace("\n", " ").strip()
+                            
                             st.markdown(f"""
                             <div class="source-box">
-                                <strong>{source}</strong> (Chunk {chunk}, Score: {1-score:.2f})<br>
-                                {doc.page_content[:300]}...
+                                <strong>#{i} — {source}</strong> (Chunk {chunk})<br>
+                                <small>Relevance: <b>{1-score:.3f}</b></small><br>
+                                {preview[:450]}{"..." if len(preview) > 450 else ""}
                             </div>
                             """, unsafe_allow_html=True)
                 
