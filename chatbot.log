@@ -1,0 +1,8 @@
+2025-12-02 14:12:55,809 - ERROR - Failed to initialize OpenAI clients: The api_key client option must be set either by passing api_key to the client or by setting the OPENAI_API_KEY environment variable
+2025-12-02 14:14:10,547 - ERROR - Failed to initialize OpenAI clients: The api_key client option must be set either by passing api_key to the client or by setting the OPENAI_API_KEY environment variable
+2025-12-02 14:15:25,144 - ERROR - Failed to initialize OpenAI clients: The api_key client option must be set either by passing api_key to the client or by setting the OPENAI_API_KEY environment variable
+2025-12-02 14:25:40,952 - ERROR - Failed to initialize OpenAI clients: The api_key client option must be set either by passing api_key to the client or by setting the OPENAI_API_KEY environment variable
+2025-12-02 14:32:52,591 - INFO - Loading faiss with AVX2 support.
+2025-12-02 14:32:52,833 - INFO - Successfully loaded faiss with AVX2 support.
+2025-12-02 14:38:03,427 - INFO - Loading faiss with AVX2 support.
+2025-12-02 14:38:03,507 - INFO - Successfully loaded faiss with AVX2 support.

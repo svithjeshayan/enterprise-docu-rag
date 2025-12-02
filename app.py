@@ -1,269 +1,600 @@
-# app.py
-import os
-import time
-import threading
-from pathlib import Path
-from typing import List
-from dotenv import load_dotenv
-
+# app_improved.py — PHASE 3 IMPROVED: Production-Ready Multi-User RAG Chatbot
 import streamlit as st
+from pathlib import Path
+import hashlib
+import sqlite3
+import json
+import uuid
+from datetime import datetime, timedelta
+from typing import List, Dict, Optional, Tuple
+import fitz
+import pytesseract
+from pdf2image import convert_from_path
+import threading
+from contextlib import contextmanager
+import logging
 
-# PDF / Docx
-import fitz  # PyMuPDF
-import docx
-
-# Optional OCR
-try:
-    import pytesseract
-    from pdf2image import convert_from_path
-    OCR_AVAILABLE = True
-except Exception:
-    OCR_AVAILABLE = False
-
-# LangChain (split packages for langchain 1.1.x)
+# LangChain + Vector DB
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
-from langchain_community.vectorstores import FAISS
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from langchain_community.vectorstores import FAISS
 
-load_dotenv()
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# === LOGGING SETUP ===
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('chatbot.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
-# ---------------------------
-# Utility: file -> text extraction
-# ---------------------------
-def extract_text_from_pdf(path: Path, ocr_if_needed: bool = True) -> str:
+# === CONFIG ===
+pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+POPPLER_PATH = r"E:\Downloads\Release-25.11.0-0\poppler-25.11.0\Library\bin"
+DOCS_FOLDER = Path(r"E:\My Projects\Chatbot For excisting model\Server")
+DB_PATH = Path("phase3_chatbot.db")
+INDEX_PATH = Path("faiss_index")
+INDEX_PATH.mkdir(exist_ok=True)
+
+# Rate limiting config
+RATE_LIMIT_QUERIES = 20  # queries per time window
+RATE_LIMIT_WINDOW = 60  # seconds
+
+# Embedding & LLM with error handling
+try:
+    embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+except Exception as e:
+    logger.error(f"Failed to initialize OpenAI clients: {e}")
+    st.error("⚠️ Failed to initialize AI models. Please check your API keys in secrets.")
+    st.stop()
+
+# Thread lock for vector store operations
+vs_lock = threading.Lock()
+
+# === DATABASE SETUP ===
+def init_db():
+    """Initialize SQLite database with proper schema"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    
+    # Users table with UUID
+    c.execute("""CREATE TABLE IF NOT EXISTS users (
+                user_id TEXT PRIMARY KEY,
+                name TEXT,
+                created_at TEXT
+    )""")
+    
+    # Chats table with user isolation
+    c.execute("""CREATE TABLE IF NOT EXISTS chats (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT,
+                timestamp TEXT,
+                role TEXT,
+                content TEXT,
+                FOREIGN KEY (user_id) REFERENCES users(user_id)
+    )""")
+    
+    # Documents table with content hash
+    c.execute("""CREATE TABLE IF NOT EXISTS documents (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename TEXT UNIQUE,
+                file_hash TEXT,
+                content_hash TEXT,
+                processed_at TEXT,
+                chunk_count INTEGER,
+                status TEXT DEFAULT 'active'
+    )""")
+    
+    # Document chunks for tracking
+    c.execute("""CREATE TABLE IF NOT EXISTS document_chunks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                doc_id INTEGER,
+                chunk_index INTEGER,
+                content_hash TEXT,
+                FOREIGN KEY (doc_id) REFERENCES documents(id)
+    )""")
+    
+    # Rate limiting table
+    c.execute("""CREATE TABLE IF NOT EXISTS rate_limits (
+                user_id TEXT,
+                timestamp TEXT,
+                PRIMARY KEY (user_id, timestamp)
+    )""")
+    
+    # Create indexes for performance
+    c.execute("CREATE INDEX IF NOT EXISTS idx_chats_user ON chats(user_id, timestamp)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_rate_limits ON rate_limits(user_id, timestamp)")
+    
+    conn.commit()
+    conn.close()
+
+init_db()
+
+# === RATE LIMITING ===
+def check_rate_limit(user_id: str) -> Tuple[bool, int]:
+    """Check if user has exceeded rate limit. Returns (allowed, remaining_queries)"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    
+    cutoff_time = (datetime.now() - timedelta(seconds=RATE_LIMIT_WINDOW)).isoformat()
+    
+    # Clean old entries
+    c.execute("DELETE FROM rate_limits WHERE timestamp < ?", (cutoff_time,))
+    
+    # Count recent queries
+    c.execute("SELECT COUNT(*) FROM rate_limits WHERE user_id = ? AND timestamp >= ?", 
+              (user_id, cutoff_time))
+    count = c.fetchone()[0]
+    
+    if count >= RATE_LIMIT_QUERIES:
+        conn.close()
+        return False, 0
+    
+    # Log this query
+    c.execute("INSERT INTO rate_limits (user_id, timestamp) VALUES (?, ?)",
+              (user_id, datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
+    
+    return True, RATE_LIMIT_QUERIES - count - 1
+
+# === USER SESSION (Improved with UUID) ===
+def get_or_create_user() -> Tuple[str, str]:
+    """Get or create user with UUID-based authentication"""
+    if "user_id" not in st.session_state:
+        # Check for existing session
+        if "temp_name" in st.session_state:
+            name = st.session_state.temp_name
+        else:
+            name = st.text_input("👤 Enter your name to start:", key="name_input")
+            if not name:
+                st.info("Please enter your name to begin chatting with documents.")
+                st.stop()
+            st.session_state.temp_name = name
+        
+        # Generate UUID for new users
+        user_id = str(uuid.uuid4())
+        
+        # Store in database
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("INSERT OR IGNORE INTO users (user_id, name, created_at) VALUES (?, ?, ?)",
+                  (user_id, name, datetime.now().isoformat()))
+        conn.commit()
+        conn.close()
+        
+        st.session_state.user_id = user_id
+        st.session_state.user_name = name
+        st.rerun()
+    
+    return st.session_state.user_id, st.session_state.user_name
+
+user_id, user_name = get_or_create_user()
+
+# === VECTOR STORE MANAGEMENT ===
+@contextmanager
+def vector_store_session():
+    """Context manager for thread-safe vector store operations"""
+    vs_lock.acquire()
     try:
-        doc = fitz.open(str(path))
-        text = ""
-        for page in doc:
-            text += page.get_text()
-        doc.close()
-    except Exception:
-        text = ""
+        yield
+    finally:
+        vs_lock.release()
 
-    # If no text and OCR requested & available => try OCR
-    if (not text.strip()) and ocr_if_needed and OCR_AVAILABLE:
+def load_or_create_vectorstore() -> FAISS:
+    """Load existing FAISS index or create new one"""
+    index_file = INDEX_PATH / "index.faiss"
+    if index_file.exists():
         try:
-            # convert first N pages to images (adjust dpi if needed)
-            images = convert_from_path(str(path), dpi=200)
-            ocr_text = []
-            for img in images:
-                ocr_text.append(pytesseract.image_to_string(img))
-            text = "\n".join(ocr_text)
+            return FAISS.load_local(
+                str(INDEX_PATH), 
+                embeddings, 
+                allow_dangerous_deserialization=True
+            )
         except Exception as e:
-            st.warning(f"OCR failed for {path.name}: {e}")
-            text = ""
-    return text
+            logger.error(f"Failed to load FAISS index: {e}")
+            # Backup corrupted index
+            import shutil
+            backup_path = INDEX_PATH / f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            shutil.move(str(INDEX_PATH), str(backup_path))
+            logger.info(f"Corrupted index backed up to {backup_path}")
+    
+    # Create new index
+    dummy_doc = Document(page_content="Initialization document", metadata={"source": "system"})
+    return FAISS.from_documents([dummy_doc], embeddings)
 
-def extract_text_from_docx(path: Path) -> str:
-    try:
-        doc = docx.Document(str(path))
-        return "\n".join([p.text for p in doc.paragraphs])
-    except Exception:
-        return ""
-
-def extract_text_from_txt(path: Path) -> str:
-    try:
-        return path.read_text(errors="ignore")
-    except Exception:
-        return ""
-
-# ---------------------------
-# Document loader (with metadata)
-# ---------------------------
-def load_documents_from_folder(folder: Path, allowed_ext=(".pdf", ".docx", ".txt"), ocr_if_needed=True) -> List[Document]:
-    docs = []
-    files = sorted([p for p in folder.glob("*") if p.suffix.lower() in allowed_ext])
-    for p in files:
-        text = ""
-        if p.suffix.lower() == ".pdf":
-            text = extract_text_from_pdf(p, ocr_if_needed)
-        elif p.suffix.lower() == ".docx":
-            text = extract_text_from_docx(p)
-        elif p.suffix.lower() == ".txt":
-            text = extract_text_from_txt(p)
-
-        if not text or len(text.strip()) < 20:
-            # Skip empty / scanned (unless OCR rescued)
-            st.info(f"Skipping (no text): {p.name}")
-            continue
-
-        meta = {"source": str(p), "name": p.name}
-        docs.append(Document(page_content=text, metadata=meta))
-    return docs
-
-# ---------------------------
-# Chunking, embedding, vectorstore builder
-# ---------------------------
-def build_vectorstore(documents: List[Document], chunk_size=1200, chunk_overlap=200):
-    splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
-    chunks = splitter.split_documents(documents)
-    embeddings = OpenAIEmbeddings()  # uses OPENAI_API_KEY env
-    vectorstore = FAISS.from_documents(chunks, embeddings)
-    return vectorstore, chunks
-
-# ---------------------------
-# Folder watcher (watchdog-based background thread)
-# ---------------------------
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
-
-class FolderChangeHandler(FileSystemEventHandler):
-    def __init__(self, folder_path: Path, on_change_callback):
-        super().__init__()
-        self.folder_path = folder_path
-        self.on_change_callback = on_change_callback
-        self._debounce_time = 1.0
-        self._last_trigger = 0.0
-
-    def on_any_event(self, event):
-        # Debounce rapid events
-        now = time.time()
-        if now - self._last_trigger < self._debounce_time:
-            return
-        self._last_trigger = now
-        # Call the callback in a thread-safe way
-        threading.Thread(target=self.on_change_callback, daemon=True).start()
-
-def start_folder_watcher(folder: Path, on_change_callback):
-    event_handler = FolderChangeHandler(folder, on_change_callback)
-    observer = Observer()
-    observer.schedule(event_handler, str(folder), recursive=False)
-    observer.daemon = True
-    observer.start()
-    return observer
-
-# ---------------------------
-# Streamlit UI + state
-# ---------------------------
-st.set_page_config(page_title="Phase-2 Document Chatbot", layout="wide")
-st.title("Phase-2 — Advanced RAG Chatbot (Local Folder)")
-
-# Sidebar settings
-st.sidebar.header("Settings")
-folder_input = st.sidebar.text_input("Folder path (local):", value=r"E:\My Projects\Chatbot For excisting model\Server")
-use_ocr = st.sidebar.checkbox("Enable OCR for scanned PDFs (requires Tesseract & Poppler)", value=False)
-auto_watch = st.sidebar.checkbox("Enable Auto-watch folder (rebuild on changes)", value=False)
-chunk_size = st.sidebar.number_input("Chunk size (words)", value=1200, min_value=200, max_value=5000, step=100)
-chunk_overlap = st.sidebar.number_input("Chunk overlap (words)", value=200, min_value=0, max_value=1000, step=50)
-top_k = st.sidebar.slider("Retrieval top K", value=4, min_value=1, max_value=10)
-
-# Session state
+# Initialize vector store in session state for thread safety
 if "vectorstore" not in st.session_state:
-    st.session_state["vectorstore"] = None
-if "chunks" not in st.session_state:
-    st.session_state["chunks"] = []
-if "last_build" not in st.session_state:
-    st.session_state["last_build"] = None
-if "watcher" not in st.session_state:
-    st.session_state["watcher"] = None
-if "chat_history" not in st.session_state:
-    st.session_state["chat_history"] = []
+    with vector_store_session():
+        st.session_state.vectorstore = load_or_create_vectorstore()
 
-folder = Path(folder_input)
+# === OCR + TEXT EXTRACTION (Improved with error handling) ===
+def extract_text(pdf_path: Path, timeout: int = 300) -> Optional[str]:
+    """
+    Extract text from PDF with OCR fallback and timeout protection
+    
+    Args:
+        pdf_path: Path to PDF file
+        timeout: Maximum processing time in seconds
+    
+    Returns:
+        Extracted text or None if failed
+    """
+    try:
+        # Try native text extraction first
+        doc = fitz.open(pdf_path)
+        text = "\n".join(page.get_text() for page in doc)
+        doc.close()
+        
+        # If sufficient text found, return it
+        if len(text.strip()) > 100:
+            logger.info(f"Extracted {len(text)} chars from {pdf_path.name} (native)")
+            return text
+    except Exception as e:
+        logger.warning(f"Native extraction failed for {pdf_path.name}: {e}")
+    
+    # Fallback to OCR
+    try:
+        logger.info(f"Starting OCR for {pdf_path.name}")
+        images = convert_from_path(
+            str(pdf_path), 
+            dpi=300,  # Reduced from 350 for performance
+            poppler_path=POPPLER_PATH,
+            timeout=timeout
+        )
+        
+        ocr_text = []
+        for i, img in enumerate(images):
+            try:
+                page_text = pytesseract.image_to_string(img, lang='eng', timeout=30)
+                ocr_text.append(page_text)
+                logger.info(f"OCR page {i+1}/{len(images)} complete")
+            except Exception as e:
+                logger.error(f"OCR failed on page {i+1}: {e}")
+                continue
+        
+        full_text = "\n\n".join(ocr_text)
+        logger.info(f"OCR complete: {len(full_text)} chars from {pdf_path.name}")
+        return full_text if full_text.strip() else None
+        
+    except Exception as e:
+        logger.error(f"OCR failed for {pdf_path.name}: {e}")
+        return None
 
-# Build/Rebuild function
-def rebuild_action():
-    if not folder.exists():
-        st.session_state["last_build"] = f"Folder not found: {folder}"
-        return
-    st.session_state["last_build"] = "Building..."
-    docs = load_documents_from_folder(folder, ocr_if_needed=use_ocr)
-    if not docs:
-        st.session_state["last_build"] = "No readable documents found to build."
-        return
-    vs, chunks = build_vectorstore(docs, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
-    st.session_state["vectorstore"] = vs
-    st.session_state["chunks"] = chunks
-    st.session_state["last_build"] = f"Built vectorstore with {len(chunks)} chunks at {time.strftime('%Y-%m-%d %H:%M:%S')}"
+def get_content_hash(text: str) -> str:
+    """Generate hash of document content (not file)"""
+    return hashlib.sha256(text.encode()).hexdigest()
 
-# Start / Stop watcher handlers
-def start_watcher():
-    if not folder.exists():
-        st.warning("Folder does not exist — cannot start watcher.")
-        return
-    if st.session_state["watcher"] is not None:
-        return
-    def on_change():
-        # small sleep to allow file writes to finish
-        time.sleep(1.0)
-        rebuild_action()
-    observer = start_folder_watcher(folder, on_change)
-    st.session_state["watcher"] = observer
-    st.session_state["last_build"] = (st.session_state.get("last_build") or "") + "\nWatcher started."
+def get_file_hash(path: Path) -> str:
+    """Generate hash of file bytes"""
+    return hashlib.md5(path.read_bytes()).hexdigest()
 
-def stop_watcher():
-    obs = st.session_state.get("watcher")
-    if obs is not None:
-        obs.stop()
-        obs.join(timeout=0.5)
-    st.session_state["watcher"] = None
-    st.session_state["last_build"] = (st.session_state.get("last_build") or "") + "\nWatcher stopped."
+# === DOCUMENT PROCESSING ===
+def rebuild_vectorstore():
+    """Rebuild/update vector store with new or modified documents"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    
+    with st.status("🔄 Updating knowledge base...") as status:
+        docs_to_add = []
+        docs_to_remove = []
+        
+        # Check for removed documents
+        c.execute("SELECT id, filename FROM documents WHERE status='active'")
+        existing_docs = {row[1]: row[0] for row in c.fetchall()}
+        
+        current_files = {pdf.name for pdf in DOCS_FOLDER.glob("*.pdf")}
+        removed_files = set(existing_docs.keys()) - current_files
+        
+        if removed_files:
+            status.write(f"📤 Removing {len(removed_files)} deleted documents...")
+            for filename in removed_files:
+                c.execute("UPDATE documents SET status='deleted' WHERE filename=?", (filename,))
+                logger.info(f"Marked {filename} as deleted")
+        
+        # Process new/updated documents
+        processed = 0
+        failed = 0
+        
+        for pdf in DOCS_FOLDER.glob("*.pdf"):
+            file_hash = get_file_hash(pdf)
+            
+            c.execute("SELECT file_hash, content_hash FROM documents WHERE filename=?", (pdf.name,))
+            row = c.fetchone()
+            
+            # Skip if unchanged
+            if row and row[0] == file_hash:
+                continue
+            
+            status.write(f"📄 Processing: {pdf.name}")
+            
+            try:
+                # Extract text
+                text = extract_text(pdf)
+                if not text:
+                    logger.error(f"No text extracted from {pdf.name}")
+                    failed += 1
+                    continue
+                
+                content_hash = get_content_hash(text)
+                
+                # Skip if content unchanged (file metadata changed but not content)
+                if row and row[1] == content_hash:
+                    c.execute("UPDATE documents SET file_hash=? WHERE filename=?", 
+                             (file_hash, pdf.name))
+                    continue
+                
+                # Split into chunks
+                splitter = RecursiveCharacterTextSplitter(
+                    chunk_size=800,  # Increased from 600 for better context
+                    chunk_overlap=150,  # Increased overlap
+                    length_function=len,
+                    separators=["\n\n", "\n", ". ", " ", ""]
+                )
+                chunks = splitter.split_text(text)
+                
+                # Create documents with rich metadata
+                for i, chunk in enumerate(chunks):
+                    docs_to_add.append(Document(
+                        page_content=chunk,
+                        metadata={
+                            "source": pdf.name,
+                            "chunk": i + 1,
+                            "total_chunks": len(chunks),
+                            "updated": datetime.now().isoformat(),
+                            "content_hash": get_content_hash(chunk)
+                        }
+                    ))
+                
+                # Update database
+                c.execute("""INSERT OR REPLACE INTO documents 
+                            (filename, file_hash, content_hash, processed_at, chunk_count, status)
+                            VALUES (?, ?, ?, ?, ?, 'active')""",
+                         (pdf.name, file_hash, content_hash, datetime.now().isoformat(), len(chunks)))
+                
+                processed += 1
+                logger.info(f"Processed {pdf.name}: {len(chunks)} chunks")
+                
+            except Exception as e:
+                logger.error(f"Failed to process {pdf.name}: {e}")
+                failed += 1
+                continue
+        
+        # Update vector store
+        if docs_to_add:
+            status.write(f"🔧 Adding {len(docs_to_add)} chunks to vector store...")
+            
+            with vector_store_session():
+                # CRITICAL FIX: Use add_documents instead of from_documents
+                st.session_state.vectorstore.add_documents(docs_to_add)
+                st.session_state.vectorstore.save_local(str(INDEX_PATH))
+            
+            status.update(label=f"✅ Knowledge base updated! ({processed} docs processed)", 
+                         state="complete")
+            st.success(f"✅ Processed {processed} documents, {len(docs_to_add)} chunks added")
+            if failed > 0:
+                st.warning(f"⚠️ {failed} documents failed to process")
+        else:
+            status.update(label="✅ All documents up to date", state="complete")
+            st.info("ℹ️ No new documents to process")
+    
+    conn.commit()
+    conn.close()
 
-# Controls
-col1, col2, col3 = st.columns([1,1,1])
-with col1:
-    if st.button("Build / Rebuild Now"):
-        rebuild_action()
-with col2:
-    if auto_watch and st.session_state["watcher"] is None:
-        start_watcher()
-    elif (not auto_watch) and st.session_state["watcher"] is not None:
-        stop_watcher()
-with col3:
-    if st.button("Clear Chat History"):
-        st.session_state["chat_history"] = []
+# === CHAT HISTORY MANAGEMENT ===
+def load_chat_history(limit: int = 50) -> List[Dict[str, str]]:
+    """Load recent chat history for current user"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""SELECT role, content FROM chats 
+                WHERE user_id=? 
+                ORDER BY timestamp DESC 
+                LIMIT ?""", (user_id, limit))
+    messages = [{"role": r[0], "content": r[1]} for r in reversed(c.fetchall())]
+    conn.close()
+    return messages
 
-st.markdown("### Build log")
-st.text_area("Log", value=st.session_state.get("last_build") or "No builds yet.", height=120)
+def save_message(role: str, content: str):
+    """Save message to database"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""INSERT INTO chats (user_id, timestamp, role, content) 
+                VALUES (?, ?, ?, ?)""",
+              (user_id, datetime.now().isoformat(), role, content))
+    conn.commit()
+    conn.close()
 
-# Query area
-st.markdown("---")
-st.header("Ask the Documents")
-query = st.text_input("Question:", key="query_input")
-if st.button("Ask"):
-    if st.session_state["vectorstore"] is None:
-        st.error("No vectorstore built — click 'Build / Rebuild Now' first.")
-    else:
-        vs = st.session_state["vectorstore"]
-        results = vs.similarity_search(query, k=top_k)
-        # Prepare context
-        context = "\n\n".join([r.page_content for r in results])
-        # Build a prompt that uses chat history
-        history_snippet = ""
-        if st.session_state["chat_history"]:
-            # include last 4 messages (user+assistant pairs) to keep token usage reasonable
-            hist = st.session_state["chat_history"][-8:]
-            history_snippet = "\n".join(hist)
-        prompt = f"""You are a helpful company assistant. Use ONLY the information from DOCUMENT CONTEXT to answer. If not found, say "I could not find this information in the documents."
+def get_conversation_context(messages: List[Dict], max_turns: int = 5) -> str:
+    """Build conversation context from recent messages"""
+    if not messages:
+        return ""
+    
+    recent = messages[-max_turns*2:] if len(messages) > max_turns*2 else messages
+    context_lines = []
+    
+    for msg in recent:
+        role = "User" if msg["role"] == "user" else "Assistant"
+        context_lines.append(f"{role}: {msg['content']}")
+    
+    return "\n".join(context_lines)
 
-Chat history:
-{history_snippet}
+# Initialize chat history
+if "messages" not in st.session_state:
+    st.session_state.messages = load_chat_history()
 
-USER QUESTION:
-{query}
+# === MAIN UI ===
+st.set_page_config(
+    page_title="Enterprise RAG Chatbot",
+    page_icon="📚",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Custom CSS
+st.markdown("""
+<style>
+    .stChatMessage { padding: 1rem; }
+    .source-box { 
+        background: #f0f2f6; 
+        padding: 0.5rem; 
+        border-radius: 0.5rem; 
+        margin: 0.5rem 0;
+        font-size: 0.9rem;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+st.title("📚 Enterprise Document Assistant")
+st.caption(f"Multi-user • Persistent • Auto-updating • OCR-enabled | User: **{user_name}**")
+
+# === SIDEBAR ===
+with st.sidebar:
+    st.header("⚙️ Controls")
+    
+    if st.button("🔄 Rebuild Knowledge Base", use_container_width=True):
+        rebuild_vectorstore()
+        st.rerun()
+    
+    if st.button("🗑️ Clear My Chat History", use_container_width=True):
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("DELETE FROM chats WHERE user_id=?", (user_id,))
+        conn.commit()
+        conn.close()
+        st.session_state.messages = []
+        st.success("Chat history cleared!")
+        st.rerun()
+    
+    st.markdown("---")
+    st.header("📊 Statistics")
+    
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    
+    c.execute("SELECT COUNT(*) FROM documents WHERE status='active'")
+    doc_count = c.fetchone()[0]
+    
+    c.execute("SELECT SUM(chunk_count) FROM documents WHERE status='active'")
+    chunk_count = c.fetchone()[0] or 0
+    
+    c.execute("SELECT COUNT(*) FROM chats WHERE user_id=?", (user_id,))
+    msg_count = c.fetchone()[0]
+    
+    conn.close()
+    
+    st.metric("📄 Active Documents", doc_count)
+    st.metric("🧩 Total Chunks", chunk_count)
+    st.metric("💬 Your Messages", msg_count)
+    
+    # Rate limit info
+    allowed, remaining = check_rate_limit(user_id + "_check")  # Don't count this check
+    st.metric("⏱️ Queries Remaining", f"{remaining}/{RATE_LIMIT_QUERIES}")
+
+# Auto-rebuild on first load
+if not (INDEX_PATH / "index.faiss").exists():
+    with st.spinner("Building initial knowledge base..."):
+        rebuild_vectorstore()
+
+# === CHAT DISPLAY ===
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+
+# === CHAT INPUT ===
+if prompt := st.chat_input("💬 Ask about your documents...", key="chat_input"):
+    # Check rate limit
+    allowed, remaining = check_rate_limit(user_id)
+    if not allowed:
+        st.error(f"⚠️ Rate limit exceeded. Please wait {RATE_LIMIT_WINDOW} seconds before sending more messages.")
+        st.stop()
+    
+    # Display user message
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    save_message("user", prompt)
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    # Generate response
+    with st.chat_message("assistant"):
+        with st.spinner("🔍 Searching documents..."):
+            try:
+                # Perform semantic search
+                with vector_store_session():
+                    results = st.session_state.vectorstore.similarity_search_with_score(
+                        prompt, 
+                        k=8
+                    )
+                
+                # Filter by relevance score (lower is better for FAISS)
+                relevant_results = [(doc, score) for doc, score in results if score < 1.0]
+                
+                if not relevant_results:
+                    answer = "I couldn't find relevant information in the current documents to answer your question."
+                    st.markdown(answer)
+                else:
+                    # Build context
+                    context_parts = []
+                    for doc, score in relevant_results:
+                        source = doc.metadata.get('source', 'Unknown')
+                        chunk_num = doc.metadata.get('chunk', '?')
+                        context_parts.append(
+                            f"[Source: {source}, Chunk {chunk_num}, Relevance: {1-score:.2f}]\n{doc.page_content}"
+                        )
+                    
+                    context = "\n\n---\n\n".join(context_parts)
+                    conversation_history = get_conversation_context(st.session_state.messages[:-1])
+                    
+                    # Build prompt with conversation context
+                    system_prompt = f"""You are an expert document assistant. Answer questions using ONLY the provided context.
+
+CONVERSATION HISTORY:
+{conversation_history if conversation_history else "No previous conversation"}
 
 DOCUMENT CONTEXT:
 {context}
-"""
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.2)
-        response = llm.invoke(prompt)
-        answer = response.content
 
-        # Save to history
-        st.session_state["chat_history"].append(f"User: {query}")
-        st.session_state["chat_history"].append(f"Assistant: {answer}")
+INSTRUCTIONS:
+- Provide accurate, professional answers based solely on the context
+- If information is not in the context, say: "I don't have this information in the current documents"
+- Cite sources when possible (e.g., "According to [document name]...")
+- Keep answers concise but complete
+- Maintain conversation continuity when relevant
 
-        # Display answer and sources
-        st.markdown("**Answer:**")
-        st.write(answer)
-        st.markdown("**Sources:**")
-        for r in results:
-            src = r.metadata.get("source") or r.metadata.get("name")
-            st.write("-", src)
+QUESTION: {prompt}"""
+                    
+                    # Get LLM response
+                    response = llm.invoke(system_prompt)
+                    answer = response.content
+                    
+                    st.markdown(answer)
+                    
+                    # Show sources
+                    with st.expander("📚 View Sources"):
+                        for doc, score in relevant_results:
+                            source = doc.metadata.get('source', 'Unknown')
+                            chunk = doc.metadata.get('chunk', '?')
+                            st.markdown(f"""
+                            <div class="source-box">
+                                <strong>{source}</strong> (Chunk {chunk}, Score: {1-score:.2f})<br>
+                                {doc.page_content[:300]}...
+                            </div>
+                            """, unsafe_allow_html=True)
+                
+                # Save assistant message
+                st.session_state.messages.append({"role": "assistant", "content": answer})
+                save_message("assistant", answer)
+                
+            except Exception as e:
+                logger.error(f"Error generating response: {e}")
+                error_msg = "I encountered an error while processing your question. Please try again."
+                st.error(error_msg)
+                st.session_state.messages.append({"role": "assistant", "content": error_msg})
+                save_message("assistant", error_msg)
 
-# Chat history display
-st.markdown("### Chat history (latest first)")
-for msg in reversed(st.session_state["chat_history"][-50:]):
-    st.write(msg)
+# Footer
+st.markdown("---")
+st.caption(f"🔒 Session ID: `{user_id[:8]}...` | Queries remaining: {remaining}/{RATE_LIMIT_QUERIES}")

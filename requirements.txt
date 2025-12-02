@@ -1,8 +1,15 @@
-streamlit
-PyPDF2
-python-docx
-pandas
-sentence-transformers
-faiss-cpu
-openai
-langchain
+# ============================================
+# requirements.txt
+# ============================================
+streamlit>=1.28.0
+langchain>=0.1.0
+langchain-openai>=0.0.5
+langchain-community>=0.0.20
+openai>=1.10.0
+faiss-cpu>=1.7.4
+PyMuPDF>=1.23.0
+python-docx>=1.1.0
+pytesseract>=0.3.10
+pdf2image>=1.16.3
+python-dotenv>=1.0.0
+watchdog>=3.0.0
