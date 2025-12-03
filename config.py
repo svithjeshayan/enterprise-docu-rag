@@ -10,7 +10,7 @@ class Config:
     
     # === PATHS ===
     BASE_DIR = Path(__file__).parent
-    DOCS_FOLDER = Path(os.getenv("DOCS_FOLDER", r"E:\My Projects\Chatbot For excisting model\Server"))
+    DOCS_FOLDER = Path(os.getenv("DOCS_FOLDER", r"Z:\Chat bot testing"))
     DB_PATH = Path(os.getenv("DB_PATH", "phase3_chatbot.db"))
     INDEX_PATH = Path(os.getenv("INDEX_PATH", "faiss_index"))
     LOG_PATH = Path(os.getenv("LOG_PATH", "chatbot.log"))

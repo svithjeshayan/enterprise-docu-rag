@@ -29,3 +29,26 @@
 2025-12-03 08:57:45,059 - INFO - Successfully loaded faiss with AVX2 support.
 2025-12-03 09:05:02,900 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
 2025-12-03 09:05:05,619 - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-03 10:19:58,808 - INFO - Loading faiss with AVX2 support.
+2025-12-03 10:19:59,030 - INFO - Successfully loaded faiss with AVX2 support.
+2025-12-03 10:22:45,634 - INFO - Extracted 1119017 chars from establishments-code-volume-i-2013(t).pdf (native)
+2025-12-03 10:22:45,757 - INFO - Processed establishments-code-volume-i-2013(t).pdf: 1848 chunks
+2025-12-03 10:22:58,609 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-12-03 10:23:13,467 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-12-03 10:23:24,980 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-12-03 10:26:32,006 - INFO - Extracted 1315 chars from aph-1.pdf (native)
+2025-12-03 10:26:32,008 - INFO - Processed aph-1.pdf: 2 chunks
+2025-12-03 10:26:34,678 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-12-03 11:25:26,963 - INFO - Loading faiss with AVX2 support.
+2025-12-03 11:25:27,047 - INFO - Successfully loaded faiss with AVX2 support.
+2025-12-03 11:25:34,367 - INFO - Processed covering letter audit.docx: 2 chunks
+2025-12-03 11:25:34,405 - INFO - Processed sample3.docx: 3 chunks
+2025-12-03 11:25:35,771 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-12-03 11:28:07,618 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-12-03 11:28:35,725 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-12-03 11:28:40,551 - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-03 11:29:40,877 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-12-03 11:31:02,364 - INFO - Processed example.txt: 6 chunks
+2025-12-03 11:31:04,125 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-12-03 11:32:03,022 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-12-03 11:32:05,057 - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"

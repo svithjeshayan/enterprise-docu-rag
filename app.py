@@ -10,9 +10,10 @@ import json
 import uuid
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple
-import fitz
+import fitz  # PyMuPDF
 import pytesseract
 from pdf2image import convert_from_path
+import docx  # === NEW: For Word Documents ===
 import threading
 from contextlib import contextmanager
 import logging
@@ -83,7 +84,7 @@ logger = logging.getLogger(__name__)
 # === CONFIG ===
 pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 POPPLER_PATH = r"E:\Downloads\Release-25.11.0-0\poppler-25.11.0\Library\bin"
-DOCS_FOLDER = Path(r"E:\My Projects\Chatbot For excisting model\Server")
+DOCS_FOLDER = Path(r"Z:\Chat bot testing")
 DB_PATH = Path("phase3_chatbot.db")
 INDEX_PATH = Path("faiss_index")
 INDEX_PATH.mkdir(exist_ok=True)
@@ -261,18 +262,30 @@ if "vectorstore" not in st.session_state:
     with vector_store_session():
         st.session_state.vectorstore = load_or_create_vectorstore()
 
-# === OCR + TEXT EXTRACTION (Improved with error handling) ===
-def extract_text(pdf_path: Path, timeout: int = 300) -> Optional[str]:
-    """
-    Extract text from PDF with OCR fallback and timeout protection
-    
-    Args:
-        pdf_path: Path to PDF file
-        timeout: Maximum processing time in seconds
-    
-    Returns:
-        Extracted text or None if failed
-    """
+# === EXTRACTORS FOR DIFFERENT FILE TYPES ===
+def extract_text_from_docx(path: Path) -> Optional[str]:
+    """Extract text from .docx files"""
+    try:
+        doc = docx.Document(path)
+        full_text = []
+        for para in doc.paragraphs:
+            if para.text.strip():
+                full_text.append(para.text)
+        return "\n".join(full_text)
+    except Exception as e:
+        logger.error(f"DOCX extraction failed for {path.name}: {e}")
+        return None
+
+def extract_text_from_txt(path: Path) -> Optional[str]:
+    """Extract text from .txt files"""
+    try:
+        return path.read_text(encoding='utf-8', errors='ignore')
+    except Exception as e:
+        logger.error(f"TXT extraction failed for {path.name}: {e}")
+        return None
+
+def extract_text_from_pdf(pdf_path: Path, timeout: int = 300) -> Optional[str]:
+    """Native PDF extraction with OCR fallback"""
     try:
         # Try native text extraction first
         doc = fitz.open(pdf_path)
@@ -291,7 +304,7 @@ def extract_text(pdf_path: Path, timeout: int = 300) -> Optional[str]:
         logger.info(f"Starting OCR for {pdf_path.name}")
         images = convert_from_path(
             str(pdf_path), 
-            dpi=300,  # Reduced from 350 for performance
+            dpi=300, 
             poppler_path=POPPLER_PATH,
             timeout=timeout
         )
@@ -312,6 +325,23 @@ def extract_text(pdf_path: Path, timeout: int = 300) -> Optional[str]:
         
     except Exception as e:
         logger.error(f"OCR failed for {pdf_path.name}: {e}")
+        return None
+
+# === MAIN DISPATCHER ===
+def extract_text(file_path: Path, timeout: int = 300) -> Optional[str]:
+    """
+    Dispatcher function to handle PDF, DOCX, and TXT files
+    """
+    ext = file_path.suffix.lower()
+    
+    if ext == '.pdf':
+        return extract_text_from_pdf(file_path, timeout)
+    elif ext == '.docx':
+        return extract_text_from_docx(file_path)
+    elif ext == '.txt':
+        return extract_text_from_txt(file_path)
+    else:
+        logger.warning(f"Unsupported file type: {file_path.name}")
         return None
 
 def get_content_hash(text: str) -> str:
@@ -336,8 +366,14 @@ def rebuild_vectorstore():
         c.execute("SELECT id, filename FROM documents WHERE status='active'")
         existing_docs = {row[1]: row[0] for row in c.fetchall()}
         
-        current_files = {pdf.name for pdf in DOCS_FOLDER.glob("*.pdf")}
-        removed_files = set(existing_docs.keys()) - current_files
+        # === UPDATED: Get all supported file types ===
+        extensions = ['*.pdf', '*.docx', '*.txt']
+        current_files_paths = []
+        for ext in extensions:
+            current_files_paths.extend(DOCS_FOLDER.glob(ext))
+        
+        current_filenames = {f.name for f in current_files_paths}
+        removed_files = set(existing_docs.keys()) - current_filenames
         
         if removed_files:
             status.write(f"📤 Removing {len(removed_files)} deleted documents...")
@@ -349,23 +385,23 @@ def rebuild_vectorstore():
         processed = 0
         failed = 0
         
-        for pdf in DOCS_FOLDER.glob("*.pdf"):
-            file_hash = get_file_hash(pdf)
+        for file_path in current_files_paths:
+            file_hash = get_file_hash(file_path)
             
-            c.execute("SELECT file_hash, content_hash FROM documents WHERE filename=?", (pdf.name,))
+            c.execute("SELECT file_hash, content_hash FROM documents WHERE filename=?", (file_path.name,))
             row = c.fetchone()
             
             # Skip if unchanged
             if row and row[0] == file_hash:
                 continue
             
-            status.write(f"📄 Processing: {pdf.name}")
+            status.write(f"📄 Processing: {file_path.name}")
             
             try:
-                # Extract text
-                text = extract_text(pdf)
+                # Extract text using the dispatcher
+                text = extract_text(file_path)
                 if not text:
-                    logger.error(f"No text extracted from {pdf.name}")
+                    logger.error(f"No text extracted from {file_path.name}")
                     failed += 1
                     continue
                 
@@ -374,7 +410,7 @@ def rebuild_vectorstore():
                 # Skip if content unchanged (file metadata changed but not content)
                 if row and row[1] == content_hash:
                     c.execute("UPDATE documents SET file_hash=? WHERE filename=?", 
-                             (file_hash, pdf.name))
+                             (file_hash, file_path.name))
                     continue
                 
                 # Split into chunks
@@ -391,7 +427,7 @@ def rebuild_vectorstore():
                     docs_to_add.append(Document(
                         page_content=chunk,
                         metadata={
-                            "source": pdf.name,
+                            "source": file_path.name,
                             "chunk": i + 1,
                             "total_chunks": len(chunks),
                             "updated": datetime.now().isoformat(),
@@ -403,13 +439,13 @@ def rebuild_vectorstore():
                 c.execute("""INSERT OR REPLACE INTO documents 
                             (filename, file_hash, content_hash, processed_at, chunk_count, status)
                             VALUES (?, ?, ?, ?, ?, 'active')""",
-                         (pdf.name, file_hash, content_hash, datetime.now().isoformat(), len(chunks)))
+                         (file_path.name, file_hash, content_hash, datetime.now().isoformat(), len(chunks)))
                 
                 processed += 1
-                logger.info(f"Processed {pdf.name}: {len(chunks)} chunks")
+                logger.info(f"Processed {file_path.name}: {len(chunks)} chunks")
                 
             except Exception as e:
-                logger.error(f"Failed to process {pdf.name}: {e}")
+                logger.error(f"Failed to process {file_path.name}: {e}")
                 failed += 1
                 continue
         
@@ -423,7 +459,7 @@ def rebuild_vectorstore():
                 st.session_state.vectorstore.save_local(str(INDEX_PATH))
             
             status.update(label=f"✅ Knowledge base updated! ({processed} docs processed)", 
-                         state="complete")
+                          state="complete")
             st.success(f"✅ Processed {processed} documents, {len(docs_to_add)} chunks added")
             if failed > 0:
                 st.warning(f"⚠️ {failed} documents failed to process")
