@@ -79,3 +79,117 @@
 2025-12-03 15:48:01,578 - INFO - Successfully loaded faiss with AVX2 support.
 2025-12-05 08:58:54,996 - INFO - Loading faiss with AVX2 support.
 2025-12-05 08:58:55,274 - INFO - Successfully loaded faiss with AVX2 support.
+2025-12-05 09:57:12,355 - ERROR - Failed to initialize OpenAI clients: The api_key client option must be set either by passing api_key to the client or by setting the OPENAI_API_KEY environment variable
+2025-12-05 09:57:33,258 - ERROR - Failed to initialize OpenAI clients: The api_key client option must be set either by passing api_key to the client or by setting the OPENAI_API_KEY environment variable
+2025-12-05 10:58:14,311 - INFO - Loading faiss with AVX2 support.
+2025-12-05 10:58:14,487 - INFO - Successfully loaded faiss with AVX2 support.
+2025-12-05 11:00:21,156 - WARNING - Folder not found: Z:\Chat bot testing\public
+2025-12-05 11:00:21,157 - WARNING - Folder not found: Z:\Chat bot testing\hr
+2025-12-05 11:00:21,159 - WARNING - Folder not found: Z:\Chat bot testing\finance
+2025-12-05 11:00:24,677 - WARNING - Folder not found: Z:\Chat bot testing\public
+2025-12-05 11:00:24,677 - WARNING - Folder not found: Z:\Chat bot testing\hr
+2025-12-05 11:00:24,678 - WARNING - Folder not found: Z:\Chat bot testing\finance
+2025-12-05 11:00:31,945 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 401 Unauthorized"
+2025-12-05 11:00:31,957 - ERROR - Error generating response: Error code: 401 - {'error': {'message': 'Incorrect API key provided: sk-proj-*******************************************************************************************************************************************************vEYA. You can find your API key at https://platform.openai.com/account/api-keys.', 'type': 'invalid_request_error', 'code': 'invalid_api_key', 'param': None}}
+2025-12-05 11:00:39,620 - WARNING - Folder not found: Z:\Chat bot testing\public
+2025-12-05 11:00:39,621 - WARNING - Folder not found: Z:\Chat bot testing\hr
+2025-12-05 11:00:39,623 - WARNING - Folder not found: Z:\Chat bot testing\finance
+2025-12-05 11:00:44,264 - WARNING - Folder not found: Z:\Chat bot testing\public
+2025-12-05 11:00:44,265 - WARNING - Folder not found: Z:\Chat bot testing\hr
+2025-12-05 11:00:44,265 - WARNING - Folder not found: Z:\Chat bot testing\finance
+2025-12-05 11:01:16,294 - WARNING - Folder not found: Z:\Chat bot testing\public
+2025-12-05 11:01:16,295 - WARNING - Folder not found: Z:\Chat bot testing\hr
+2025-12-05 11:01:16,295 - WARNING - Folder not found: Z:\Chat bot testing\finance
+2025-12-05 12:38:19,861 - ERROR - Failed to initialize OpenAI clients: The api_key client option must be set either by passing api_key to the client or by setting the OPENAI_API_KEY environment variable
+2025-12-05 12:38:36,485 - ERROR - Failed to initialize OpenAI clients: The api_key client option must be set either by passing api_key to the client or by setting the OPENAI_API_KEY environment variable
+2025-12-05 12:39:04,370 - ERROR - Failed to initialize OpenAI clients: The api_key client option must be set either by passing api_key to the client or by setting the OPENAI_API_KEY environment variable
+2025-12-05 12:39:19,648 - ERROR - Failed to initialize OpenAI clients: The api_key client option must be set either by passing api_key to the client or by setting the OPENAI_API_KEY environment variable
+2025-12-05 12:46:23,846 - ERROR - Failed to initialize OpenAI clients: The api_key client option must be set either by passing api_key to the client or by setting the OPENAI_API_KEY environment variable
+2025-12-05 14:17:48,619 - ERROR - Failed to initialize OpenAI clients: The api_key client option must be set either by passing api_key to the client or by setting the OPENAI_API_KEY environment variable
+2025-12-05 14:18:14,720 - ERROR - Failed to initialize OpenAI clients: The api_key client option must be set either by passing api_key to the client or by setting the OPENAI_API_KEY environment variable
+2025-12-05 14:19:03,575 - ERROR - Failed to initialize OpenAI clients: The api_key client option must be set either by passing api_key to the client or by setting the OPENAI_API_KEY environment variable
+2025-12-05 14:20:04,981 - ERROR - Failed to initialize OpenAI clients: The api_key client option must be set either by passing api_key to the client or by setting the OPENAI_API_KEY environment variable
+2025-12-05 14:46:22,849 - ERROR - Failed to initialize OpenAI clients: The api_key client option must be set either by passing api_key to the client or by setting the OPENAI_API_KEY environment variable
+2025-12-05 14:46:56,624 - ERROR - Failed to initialize OpenAI clients: The api_key client option must be set either by passing api_key to the client or by setting the OPENAI_API_KEY environment variable
+2025-12-05 14:47:13,649 - ERROR - Failed to initialize OpenAI clients: The api_key client option must be set either by passing api_key to the client or by setting the OPENAI_API_KEY environment variable
+2025-12-05 14:47:30,776 - ERROR - Failed to initialize OpenAI clients: The api_key client option must be set either by passing api_key to the client or by setting the OPENAI_API_KEY environment variable
+2025-12-05 14:52:11,216 - ERROR - Failed to initialize OpenAI clients: The api_key client option must be set either by passing api_key to the client or by setting the OPENAI_API_KEY environment variable
+2025-12-05 15:08:49,135 - INFO - Loading faiss with AVX2 support.
+2025-12-05 15:08:49,339 - INFO - Successfully loaded faiss with AVX2 support.
+2025-12-05 15:08:57,555 - WARNING - Folder not found: Z:\Chat bot testing\public
+2025-12-05 15:08:57,557 - WARNING - Folder not found: Z:\Chat bot testing\hr
+2025-12-05 15:08:57,558 - WARNING - Folder not found: Z:\Chat bot testing\finance
+2025-12-05 15:09:00,562 - WARNING - Folder not found: Z:\Chat bot testing\public
+2025-12-05 15:09:00,563 - WARNING - Folder not found: Z:\Chat bot testing\hr
+2025-12-05 15:09:00,564 - WARNING - Folder not found: Z:\Chat bot testing\finance
+2025-12-05 15:09:02,927 - WARNING - Folder not found: Z:\Chat bot testing\public
+2025-12-05 15:09:02,928 - WARNING - Folder not found: Z:\Chat bot testing\hr
+2025-12-05 15:09:02,930 - WARNING - Folder not found: Z:\Chat bot testing\finance
+2025-12-05 15:10:09,793 - WARNING - Folder not found: Z:\Chat bot testing\public
+2025-12-05 15:10:09,794 - WARNING - Folder not found: Z:\Chat bot testing\hr
+2025-12-05 15:17:39,328 - WARNING - Folder not found: Z:\Chat bot testing\public
+2025-12-05 15:17:39,328 - WARNING - Folder not found: Z:\Chat bot testing\hr
+2025-12-05 15:17:42,152 - WARNING - Folder not found: Z:\Chat bot testing\public
+2025-12-05 15:17:42,153 - WARNING - Folder not found: Z:\Chat bot testing\hr
+2025-12-05 15:21:03,973 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-12-05 15:21:03,989 - INFO - Loading faiss with AVX2 support.
+2025-12-05 15:21:04,068 - INFO - Successfully loaded faiss with AVX2 support.
+2025-12-05 15:21:04,111 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-12-05 15:21:04,199 - WARNING - Folder not found: Z:\Chat bot testing\public
+2025-12-05 15:21:04,201 - WARNING - Folder not found: Z:\Chat bot testing\hr
+2025-12-05 15:21:04,415 - WARNING - Folder not found: Z:\Chat bot testing\public
+2025-12-05 15:21:04,415 - WARNING - Folder not found: Z:\Chat bot testing\hr
+2025-12-05 15:21:08,682 - WARNING - Folder not found: Z:\Chat bot testing\public
+2025-12-05 15:21:08,682 - WARNING - Folder not found: Z:\Chat bot testing\hr
+2025-12-05 15:21:12,269 - WARNING - Folder not found: Z:\Chat bot testing\public
+2025-12-05 15:21:12,270 - WARNING - Folder not found: Z:\Chat bot testing\hr
+2025-12-05 15:21:12,991 - WARNING - Folder not found: Z:\Chat bot testing\public
+2025-12-05 15:21:12,991 - WARNING - Folder not found: Z:\Chat bot testing\hr
+2025-12-05 15:24:27,347 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-12-05 15:24:27,353 - INFO - Loading faiss with AVX2 support.
+2025-12-05 15:24:27,443 - INFO - Successfully loaded faiss with AVX2 support.
+2025-12-05 15:24:27,541 - WARNING - Folder not found: Z:\Chat bot testing\public
+2025-12-05 15:24:27,542 - WARNING - Folder not found: Z:\Chat bot testing\hr
+2025-12-05 15:24:27,946 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-12-05 15:24:28,019 - WARNING - Folder not found: Z:\Chat bot testing\public
+2025-12-05 15:24:28,020 - WARNING - Folder not found: Z:\Chat bot testing\hr
+2025-12-05 15:24:32,045 - WARNING - Folder not found: Z:\Chat bot testing\public
+2025-12-05 15:24:32,045 - WARNING - Folder not found: Z:\Chat bot testing\hr
+2025-12-05 15:24:37,339 - WARNING - Folder not found: Z:\Chat bot testing\public
+2025-12-05 15:24:37,339 - WARNING - Folder not found: Z:\Chat bot testing\hr
+2025-12-05 15:24:38,049 - WARNING - Folder not found: Z:\Chat bot testing\public
+2025-12-05 15:24:38,050 - WARNING - Folder not found: Z:\Chat bot testing\hr
+2025-12-05 15:24:40,832 - WARNING - Folder not found: Z:\Chat bot testing\public
+2025-12-05 15:24:40,832 - WARNING - Folder not found: Z:\Chat bot testing\hr
+2025-12-05 15:24:41,544 - WARNING - Folder not found: Z:\Chat bot testing\public
+2025-12-05 15:24:41,544 - WARNING - Folder not found: Z:\Chat bot testing\hr
+2025-12-05 15:24:49,482 - WARNING - Folder not found: Z:\Chat bot testing\public
+2025-12-05 15:24:49,482 - WARNING - Folder not found: Z:\Chat bot testing\hr
+2025-12-05 15:24:51,331 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-12-05 15:24:58,024 - WARNING - Folder not found: Z:\Chat bot testing\public
+2025-12-05 15:24:58,025 - WARNING - Folder not found: Z:\Chat bot testing\hr
+2025-12-05 15:24:58,976 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-12-05 15:25:10,861 - WARNING - Folder not found: Z:\Chat bot testing\public
+2025-12-05 15:25:10,862 - WARNING - Folder not found: Z:\Chat bot testing\hr
+2025-12-05 15:25:11,574 - WARNING - Folder not found: Z:\Chat bot testing\public
+2025-12-05 15:25:11,574 - WARNING - Folder not found: Z:\Chat bot testing\hr
+2025-12-05 15:35:33,288 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-12-05 15:35:33,537 - INFO - Extracted 1315 chars from aph-1.pdf (native)
+2025-12-05 15:35:33,538 - INFO - Processed aph-1.pdf: 2 chunks
+2025-12-05 15:35:33,700 - INFO - Extracted 89728 chars from ECode_Leave.pdf (native)
+2025-12-05 15:35:33,703 - INFO - Processed ECode_Leave.pdf: 146 chunks
+2025-12-05 15:35:33,999 - INFO - Starting OCR for epa_sample_letter_sent_to_commissioners_dated_february_29_2015.pdf
+2025-12-05 15:35:39,308 - INFO - OCR page 1/3 complete
+2025-12-05 15:35:42,322 - INFO - OCR page 2/3 complete
+2025-12-05 15:35:43,588 - INFO - OCR page 3/3 complete
+2025-12-05 15:35:43,589 - INFO - OCR complete: 6565 chars from epa_sample_letter_sent_to_commissioners_dated_february_29_2015.pdf
+2025-12-05 15:35:43,594 - INFO - Processed epa_sample_letter_sent_to_commissioners_dated_february_29_2015.pdf: 12 chunks
+2025-12-05 15:35:44,803 - INFO - Extracted 1119017 chars from establishments-code-volume-i-2013(t).pdf (native)
+2025-12-05 15:35:44,858 - INFO - Processed establishments-code-volume-i-2013(t).pdf: 1848 chunks
+2025-12-05 15:35:45,360 - INFO - Processed covering letter audit.docx: 2 chunks
+2025-12-05 15:35:45,436 - INFO - Processed sample3.docx: 3 chunks
+2025-12-05 15:35:45,454 - INFO - Processed example.txt: 6 chunks
+2025-12-05 15:35:58,871 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-12-05 15:36:16,009 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-12-05 15:36:26,914 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-12-05 15:38:05,748 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"

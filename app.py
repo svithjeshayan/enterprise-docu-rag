@@ -2,6 +2,9 @@
 import os
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
+from dotenv import load_dotenv
+load_dotenv()  # Loads .env file into os.environ
+
 import streamlit as st
 from pathlib import Path
 import hashlib
@@ -27,6 +30,13 @@ from langchain_community.vectorstores import FAISS
 import streamlit_authenticator as stauth
 import yaml
 from yaml.loader import SafeLoader
+
+# Set OpenAI key from Streamlit secrets
+if "OPENAI_API_KEY" in st.secrets:
+    os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
+else:
+    st.error("OpenAI API key not found in secrets. Please configure it in .streamlit/secrets.toml.")
+    st.stop()  # Halt app if key is missing
 
 # === FIX INVISIBLE SOURCES - INJECT CUSTOM CSS ===
 st.markdown("""
