@@ -48,4 +48,8 @@ No hallucinations. No data leaks. Full audit trail.
   # Or override: export DOCS_FOLDER="/path/to/your/docs"
 
   # Run
+<<<<<<< HEAD
   streamlit run app.py
+=======
+  streamlit run app.py
+>>>>>>> 64ee88716ab1ed871287bafc1a706829bd9839a0
