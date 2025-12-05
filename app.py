@@ -24,6 +24,10 @@ from langchain_core.documents import Document
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_community.vectorstores import FAISS
 
+import streamlit_authenticator as stauth
+import yaml
+from yaml.loader import SafeLoader
+
 # === FIX INVISIBLE SOURCES - INJECT CUSTOM CSS ===
 st.markdown("""
 <style>
@@ -85,9 +89,8 @@ logger = logging.getLogger(__name__)
 pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 POPPLER_PATH = r"E:\Downloads\Release-25.11.0-0\poppler-25.11.0\Library\bin"
 DOCS_FOLDER = Path(r"Z:\Chat bot testing")
-DB_PATH = Path("phase3_chatbot.db")
+DB_PATH = "chatbot.db"
 INDEX_PATH = Path("faiss_index")
-INDEX_PATH.mkdir(exist_ok=True)
 
 # Rate limiting config
 RATE_LIMIT_QUERIES = 20  # queries per time window
@@ -111,11 +114,17 @@ def init_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     
-    # Users table with UUID
+    # Users table with UUID and roles
     c.execute("""CREATE TABLE IF NOT EXISTS users (
                 user_id TEXT PRIMARY KEY,
+                username TEXT UNIQUE,
                 name TEXT,
-                created_at TEXT
+                email TEXT,
+                role TEXT DEFAULT 'user',
+                folders_access TEXT,
+                created_at TEXT,
+                last_login TEXT,
+                status TEXT DEFAULT 'active'
     )""")
     
     # Chats table with user isolation
@@ -155,16 +164,232 @@ def init_db():
                 PRIMARY KEY (user_id, timestamp)
     )""")
     
+    # Audit log table
+    c.execute("""CREATE TABLE IF NOT EXISTS audit_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT,
+                action TEXT,
+                details TEXT,
+                timestamp TEXT
+    )""")
+    
     # Create indexes for performance
     c.execute("CREATE INDEX IF NOT EXISTS idx_chats_user ON chats(user_id, timestamp)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_rate_limits ON rate_limits(user_id, timestamp)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_users_status ON users(status)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_audit_log ON audit_log(user_id, timestamp)")
     
     conn.commit()
     conn.close()
 
 init_db()
 
-# === RATE LIMITING ===
+# USER PERMISSIONS AND ROLES
+USER_PERMISSIONS = {
+    "john":  ["public", "hr", "finance"],
+    "sarah": ["public", "hr"],
+    "guest": ["public"],
+    "admin": ["public", "hr", "finance", "admin"]  # Admin has access to all
+}
+
+USER_ROLES = {
+    "john": "user",
+    "sarah": "user", 
+    "guest": "user",
+    "admin": "admin"  # Admin role
+}
+
+# === ADMIN FUNCTIONS ===
+def log_audit(user_id: str, action: str, details: str):
+    """Log admin actions to audit trail"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""INSERT INTO audit_log (user_id, action, details, timestamp) 
+                VALUES (?, ?, ?, ?)""",
+              (user_id, action, details, datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
+
+def add_user_to_db(username: str, name: str, email: str, role: str, folders: List[str]):
+    """Add user to database"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    try:
+        c.execute("""INSERT INTO users (user_id, username, name, email, role, folders_access, created_at, status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'active')""",
+                  (str(uuid.uuid4()), username, name, email, role, json.dumps(folders), datetime.now().isoformat()))
+        conn.commit()
+        log_audit(user_id, "USER_CREATED", f"Created user: {username}")
+        return True
+    except sqlite3.IntegrityError:
+        return False
+    finally:
+        conn.close()
+
+def update_user_in_db(username: str, name: str, email: str, role: str, folders: List[str]):
+    """Update user in database"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""UPDATE users SET name=?, email=?, role=?, folders_access=? 
+                WHERE username=?""",
+              (name, email, role, json.dumps(folders), username))
+    conn.commit()
+    conn.close()
+    log_audit(user_id, "USER_UPDATED", f"Updated user: {username}")
+
+def deactivate_user_in_db(username: str):
+    """Deactivate user (soft delete)"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("UPDATE users SET status='inactive' WHERE username=?", (username,))
+    conn.commit()
+    conn.close()
+    log_audit(user_id, "USER_DEACTIVATED", f"Deactivated user: {username}")
+
+def get_all_users():
+    """Get all users from database"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""SELECT username, name, email, role, folders_access, status, created_at, last_login 
+                FROM users WHERE status='active' ORDER BY created_at DESC""")
+    users = c.fetchall()
+    conn.close()
+    return users
+
+def sync_user_to_db(username: str, name: str):
+    """Sync authenticated user to database"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT user_id FROM users WHERE username=?", (username,))
+    exists = c.fetchone()
+    
+    if not exists:
+        # Create user record
+        folders = json.dumps(USER_PERMISSIONS.get(username, ["public"]))
+        role = USER_ROLES.get(username, "user")
+        c.execute("""INSERT INTO users (user_id, username, name, role, folders_access, created_at, last_login, status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'active')""",
+                  (str(uuid.uuid4()), username, name, role, folders, datetime.now().isoformat(), 
+                   datetime.now().isoformat()))
+    else:
+        # Update last login
+        c.execute("UPDATE users SET last_login=? WHERE username=?",
+                  (datetime.now().isoformat(), username))
+    
+    conn.commit()
+    conn.close()
+
+def update_credentials_yaml(username: str, name: str, email: str, password: str):
+    """Update credentials.yaml file with new/updated user"""
+    with open('credentials.yaml', 'r') as file:
+        config = yaml.load(file, Loader=SafeLoader)
+    
+    # Hash password
+    hashed_pw = stauth.Hasher([password]).generate()[0]
+    
+    # Add or update user
+    config['credentials']['usernames'][username] = {
+        'email': email,
+        'name': name,
+        'password': hashed_pw
+    }
+    
+    # Save back to file
+    with open('credentials.yaml', 'w') as file:
+        yaml.dump(config, file, default_flow_style=False)
+
+def remove_user_from_yaml(username: str):
+    """Remove user from credentials.yaml"""
+    with open('credentials.yaml', 'r') as file:
+        config = yaml.load(file, Loader=SafeLoader)
+    
+    if username in config['credentials']['usernames']:
+        del config['credentials']['usernames'][username]
+    
+    with open('credentials.yaml', 'w') as file:
+        yaml.dump(config, file, default_flow_style=False)
+
+# === AZURE AD / LDAP INTEGRATION (OPTIONAL) ===
+def authenticate_with_azure_ad(username: str, password: str) -> bool:
+    """
+    Authenticate user with Azure AD / Microsoft Entra ID
+    Requires: pip install msal
+    
+    To enable:
+    1. Register app in Azure Portal
+    2. Get CLIENT_ID, TENANT_ID, CLIENT_SECRET
+    3. Uncomment and configure below
+    """
+    # Uncomment to enable Azure AD authentication
+    """
+    try:
+        from msal import ConfidentialClientApplication
+        
+        CLIENT_ID = os.getenv("AZURE_CLIENT_ID")
+        TENANT_ID = os.getenv("AZURE_TENANT_ID")
+        CLIENT_SECRET = os.getenv("AZURE_CLIENT_SECRET")
+        
+        authority = f"https://login.microsoftonline.com/{TENANT_ID}"
+        app = ConfidentialClientApplication(
+            CLIENT_ID,
+            authority=authority,
+            client_credential=CLIENT_SECRET
+        )
+        
+        result = app.acquire_token_by_username_password(
+            username=username,
+            password=password,
+            scopes=["User.Read"]
+        )
+        
+        if "access_token" in result:
+            logger.info(f"Azure AD auth successful for {username}")
+            return True
+        else:
+            logger.warning(f"Azure AD auth failed for {username}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Azure AD authentication error: {e}")
+        return False
+    """
+    return False  # Disabled by default
+
+def authenticate_with_ldap(username: str, password: str) -> bool:
+    """
+    Authenticate user with LDAP (Active Directory)
+    Requires: pip install ldap3
+    
+    To enable:
+    1. Configure LDAP server details
+    2. Uncomment and configure below
+    """
+    # Uncomment to enable LDAP authentication
+    """
+    try:
+        from ldap3 import Server, Connection, ALL
+        
+        LDAP_SERVER = os.getenv("LDAP_SERVER", "ldap://your-domain.com")
+        LDAP_BASE_DN = os.getenv("LDAP_BASE_DN", "DC=company,DC=com")
+        
+        server = Server(LDAP_SERVER, get_info=ALL)
+        user_dn = f"CN={username},{LDAP_BASE_DN}"
+        
+        conn = Connection(server, user=user_dn, password=password)
+        
+        if conn.bind():
+            logger.info(f"LDAP auth successful for {username}")
+            conn.unbind()
+            return True
+        else:
+            logger.warning(f"LDAP auth failed for {username}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"LDAP authentication error: {e}")
+        return False
+    """
+    return False  # Disabled by default
 def check_rate_limit(user_id: str) -> Tuple[bool, int]:
     """Check if user has exceeded rate limit. Returns (allowed, remaining_queries)"""
     conn = sqlite3.connect(DB_PATH)
@@ -192,38 +417,44 @@ def check_rate_limit(user_id: str) -> Tuple[bool, int]:
     
     return True, RATE_LIMIT_QUERIES - count - 1
 
-# === USER SESSION (Improved with UUID) ===
-def get_or_create_user() -> Tuple[str, str]:
-    """Get or create user with UUID-based authentication"""
-    if "user_id" not in st.session_state:
-        # Check for existing session
-        if "temp_name" in st.session_state:
-            name = st.session_state.temp_name
-        else:
-            name = st.text_input("👤 Enter your name to start:", key="name_input")
-            if not name:
-                st.info("Please enter your name to begin chatting with documents.")
-                st.stop()
-            st.session_state.temp_name = name
-        
-        # Generate UUID for new users
-        user_id = str(uuid.uuid4())
-        
-        # Store in database
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        c.execute("INSERT OR IGNORE INTO users (user_id, name, created_at) VALUES (?, ?, ?)",
-                  (user_id, name, datetime.now().isoformat()))
-        conn.commit()
-        conn.close()
-        
-        st.session_state.user_id = user_id
-        st.session_state.user_name = name
-        st.rerun()
-    
-    return st.session_state.user_id, st.session_state.user_name
+# === PHASE 4: SECURE AUTH + PERMISSIONS ===
+# Load credentials
+with open('credentials.yaml') as file:
+    config = yaml.load(file, Loader=SafeLoader)
 
-user_id, user_name = get_or_create_user()
+authenticator = stauth.Authenticate(
+    config['credentials'],
+    config['cookie']['name'],
+    config['cookie']['key'],
+    config['cookie']['expiry_days']
+)
+
+# Login widget
+authenticator.login(location='main')
+
+# Check authentication status
+if st.session_state.get("authentication_status") == False:
+    st.error('Wrong username/password')
+    st.stop()
+if st.session_state.get("authentication_status") is None:
+    st.warning('Please enter your credentials')
+    st.stop()
+
+# Get user info from session state
+name = st.session_state.get("name")
+username = st.session_state.get("username")
+authentication_status = st.session_state.get("authentication_status")
+
+# Sync user to database
+sync_user_to_db(username, name)
+
+authenticator.logout(location='sidebar')
+st.sidebar.success(f"Welcome **{name}**")
+
+allowed_folders = USER_PERMISSIONS.get(username, ["public"])
+user_role = USER_ROLES.get(username, "user")
+user_id = username  # Use username as ID
+user_name = name
 
 # === VECTOR STORE MANAGEMENT ===
 @contextmanager
@@ -284,7 +515,7 @@ def extract_text_from_txt(path: Path) -> Optional[str]:
         logger.error(f"TXT extraction failed for {path.name}: {e}")
         return None
 
-def extract_text_from_pdf(pdf_path: Path, timeout: int = 300) -> Optional[str]:
+def extract_text_from_pdf(pdf_path: Path) -> Optional[str]:
     """Native PDF extraction with OCR fallback"""
     try:
         # Try native text extraction first
@@ -306,13 +537,12 @@ def extract_text_from_pdf(pdf_path: Path, timeout: int = 300) -> Optional[str]:
             str(pdf_path), 
             dpi=300, 
             poppler_path=POPPLER_PATH,
-            timeout=timeout
         )
         
         ocr_text = []
         for i, img in enumerate(images):
             try:
-                page_text = pytesseract.image_to_string(img, lang='eng', timeout=30)
+                page_text = pytesseract.image_to_string(img, lang='eng')
                 ocr_text.append(page_text)
                 logger.info(f"OCR page {i+1}/{len(images)} complete")
             except Exception as e:
@@ -328,14 +558,11 @@ def extract_text_from_pdf(pdf_path: Path, timeout: int = 300) -> Optional[str]:
         return None
 
 # === MAIN DISPATCHER ===
-def extract_text(file_path: Path, timeout: int = 300) -> Optional[str]:
-    """
-    Dispatcher function to handle PDF, DOCX, and TXT files
-    """
+def extract_text(file_path: Path) -> Optional[str]:
     ext = file_path.suffix.lower()
     
     if ext == '.pdf':
-        return extract_text_from_pdf(file_path, timeout)
+        return extract_text_from_pdf(file_path)
     elif ext == '.docx':
         return extract_text_from_docx(file_path)
     elif ext == '.txt':
@@ -366,11 +593,17 @@ def rebuild_vectorstore():
         c.execute("SELECT id, filename FROM documents WHERE status='active'")
         existing_docs = {row[1]: row[0] for row in c.fetchall()}
         
-        # === UPDATED: Get all supported file types ===
-        extensions = ['*.pdf', '*.docx', '*.txt']
+        # === FIXED: Now allowed_folders is defined ===
         current_files_paths = []
-        for ext in extensions:
-            current_files_paths.extend(DOCS_FOLDER.glob(ext))
+        for folder_name in allowed_folders:
+            folder_path = DOCS_FOLDER / folder_name
+            if not folder_path.exists():
+                logger.warning(f"Folder not found: {folder_path}")
+                continue
+            
+            # Get all supported file types from this folder
+            for ext in ['*.pdf', '*.docx', '*.txt']:
+                current_files_paths.extend(folder_path.glob(ext))
         
         current_filenames = {f.name for f in current_files_paths}
         removed_files = set(existing_docs.keys()) - current_filenames
@@ -415,8 +648,8 @@ def rebuild_vectorstore():
                 
                 # Split into chunks
                 splitter = RecursiveCharacterTextSplitter(
-                    chunk_size=800,  # Increased from 600 for better context
-                    chunk_overlap=150,  # Increased overlap
+                    chunk_size=800,
+                    chunk_overlap=150,
                     length_function=len,
                     separators=["\n\n", "\n", ". ", " ", ""]
                 )
@@ -454,7 +687,6 @@ def rebuild_vectorstore():
             status.write(f"🔧 Adding {len(docs_to_add)} chunks to vector store...")
             
             with vector_store_session():
-                # CRITICAL FIX: Use add_documents instead of from_documents
                 st.session_state.vectorstore.add_documents(docs_to_add)
                 st.session_state.vectorstore.save_local(str(INDEX_PATH))
             
@@ -533,12 +765,147 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("📚 Enterprise Document Assistant")
-st.caption(f"Multi-user • Persistent • Auto-updating • OCR-enabled | User: **{user_name}**")
+st.title("Secure Enterprise Document Assistant")
+st.caption(f"Logged in as **{name}** | Access: {', '.join(allowed_folders)}")
 
 # === SIDEBAR ===
 with st.sidebar:
     st.header("⚙️ Controls")
+    
+    # === ADMIN PANEL ===
+    if user_role == "admin":
+        with st.expander("👑 Admin Panel", expanded=False):
+            st.subheader("User Management")
+            
+            admin_action = st.radio(
+                "Action",
+                ["View Users", "Add User", "Edit User", "Deactivate User", "View Audit Log"],
+                key="admin_action"
+            )
+            
+            if admin_action == "View Users":
+                st.markdown("#### Active Users")
+                users = get_all_users()
+                if users:
+                    for user in users:
+                        username_db, name_db, email_db, role_db, folders_db, status_db, created_db, last_login_db = user
+                        folders_list = json.loads(folders_db) if folders_db else []
+                        
+                        st.markdown(f"""
+                        **{name_db}** (@{username_db})  
+                        📧 {email_db or 'N/A'} | 🔑 {role_db}  
+                        📁 Access: {', '.join(folders_list)}  
+                        🕐 Created: {created_db[:10] if created_db else 'N/A'}
+                        """)
+                        st.divider()
+                else:
+                    st.info("No users found")
+            
+            elif admin_action == "Add User":
+                st.markdown("#### Create New User")
+                with st.form("add_user_form"):
+                    new_username = st.text_input("Username*")
+                    new_name = st.text_input("Full Name*")
+                    new_email = st.text_input("Email*")
+                    new_password = st.text_input("Password*", type="password")
+                    new_role = st.selectbox("Role", ["user", "admin"])
+                    new_folders = st.multiselect(
+                        "Folder Access",
+                        ["public", "hr", "finance", "admin"],
+                        default=["public"]
+                    )
+                    
+                    if st.form_submit_button("Create User"):
+                        if new_username and new_name and new_email and new_password:
+                            # Add to database
+                            if add_user_to_db(new_username, new_name, new_email, new_role, new_folders):
+                                # Add to credentials.yaml
+                                update_credentials_yaml(new_username, new_name, new_email, new_password)
+                                st.success(f"✅ User {new_username} created successfully!")
+                                st.info("⚠️ User must log out and back in for changes to take effect")
+                            else:
+                                st.error("❌ Username already exists")
+                        else:
+                            st.error("❌ All fields are required")
+            
+            elif admin_action == "Edit User":
+                st.markdown("#### Edit Existing User")
+                users = get_all_users()
+                usernames = [u[0] for u in users]
+                
+                if usernames:
+                    selected_user = st.selectbox("Select User", usernames)
+                    
+                    # Get current user data
+                    conn = sqlite3.connect(DB_PATH)
+                    c = conn.cursor()
+                    c.execute("""SELECT name, email, role, folders_access 
+                                FROM users WHERE username=?""", (selected_user,))
+                    user_data = c.fetchone()
+                    conn.close()
+                    
+                    if user_data:
+                        current_name, current_email, current_role, current_folders = user_data
+                        current_folders_list = json.loads(current_folders) if current_folders else ["public"]
+                        
+                        with st.form("edit_user_form"):
+                            edit_name = st.text_input("Full Name", value=current_name)
+                            edit_email = st.text_input("Email", value=current_email or "")
+                            edit_role = st.selectbox("Role", ["user", "admin"], 
+                                                    index=0 if current_role == "user" else 1)
+                            edit_folders = st.multiselect(
+                                "Folder Access",
+                                ["public", "hr", "finance", "admin"],
+                                default=current_folders_list
+                            )
+                            
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                if st.form_submit_button("Update User"):
+                                    update_user_in_db(selected_user, edit_name, edit_email, edit_role, edit_folders)
+                                    st.success(f"✅ User {selected_user} updated!")
+                            
+                            with col2:
+                                new_pw = st.text_input("New Password (optional)", type="password")
+                                if st.form_submit_button("Reset Password") and new_pw:
+                                    update_credentials_yaml(selected_user, edit_name, edit_email, new_pw)
+                                    st.success("✅ Password reset successfully!")
+                else:
+                    st.info("No users to edit")
+            
+            elif admin_action == "Deactivate User":
+                st.markdown("#### Deactivate User")
+                users = get_all_users()
+                usernames = [u[0] for u in users if u[0] != username]  # Can't deactivate self
+                
+                if usernames:
+                    deactivate_user = st.selectbox("Select User", usernames)
+                    
+                    if st.button("⚠️ Deactivate User", type="secondary"):
+                        deactivate_user_in_db(deactivate_user)
+                        remove_user_from_yaml(deactivate_user)
+                        st.success(f"✅ User {deactivate_user} deactivated")
+                        st.info("⚠️ Refresh the page to see changes")
+                else:
+                    st.info("No users to deactivate")
+            
+            elif admin_action == "View Audit Log":
+                st.markdown("#### Audit Log (Last 50 Actions)")
+                conn = sqlite3.connect(DB_PATH)
+                c = conn.cursor()
+                c.execute("""SELECT user_id, action, details, timestamp 
+                            FROM audit_log ORDER BY timestamp DESC LIMIT 50""")
+                logs = c.fetchall()
+                conn.close()
+                
+                if logs:
+                    for log in logs:
+                        user_log, action_log, details_log, time_log = log
+                        st.text(f"[{time_log[:19]}] {user_log}: {action_log} - {details_log}")
+                else:
+                    st.info("No audit logs yet")
+    
+    st.markdown("---")
     
     if st.button("🔄 Rebuild Knowledge Base", use_container_width=True):
         rebuild_vectorstore()
@@ -576,7 +943,7 @@ with st.sidebar:
     st.metric("💬 Your Messages", msg_count)
     
     # Rate limit info
-    allowed, remaining = check_rate_limit(user_id + "_check")  # Don't count this check
+    allowed_queries, remaining = check_rate_limit(user_id + "_check")
     st.metric("⏱️ Queries Remaining", f"{remaining}/{RATE_LIMIT_QUERIES}")
 
 # Auto-rebuild on first load
@@ -592,8 +959,8 @@ for msg in st.session_state.messages:
 # === CHAT INPUT ===
 if prompt := st.chat_input("💬 Ask about your documents...", key="chat_input"):
     # Check rate limit
-    allowed, remaining = check_rate_limit(user_id)
-    if not allowed:
+    allowed_queries, remaining = check_rate_limit(user_id)
+    if not allowed_queries:
         st.error(f"⚠️ Rate limit exceeded. Please wait {RATE_LIMIT_WINDOW} seconds before sending more messages.")
         st.stop()
     
