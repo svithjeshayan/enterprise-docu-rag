@@ -26,6 +26,12 @@ A **production-ready**, multi-user Retrieval-Augmented Generation (RAG) chatbot 
 - Full logging + usage statistics
 - Automatic re-indexing when documents change or are added
 
+## Screenshots
+<img width="1875" height="923" alt="image" src="https://github.com/user-attachments/assets/a9e4e4ef-7d3c-4692-b3b9-3db7fb4da20b" />
+<img width="1860" height="921" alt="image" src="https://github.com/user-attachments/assets/745211b1-99b8-44b6-98dd-8a82d209e6ad" />
+
+
+
 ## Tech Stack
 
 | Component           | Technology                                      |
