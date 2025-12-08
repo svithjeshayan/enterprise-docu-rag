@@ -43,7 +43,7 @@ A **production-ready**, multi-user Retrieval-Augmented Generation (RAG) chatbot 
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/your-org/internal-rag-chatbot.git
+git clone https://github.com/svithjeshayan/enterprise-docu-rag.git
 cd internal-rag-chatbot
 
 # 2. Install dependencies
